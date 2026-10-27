@@ -794,10 +794,8 @@ The API ZIP contains Python dependencies, backend code as `crash_app/`, and SQLi
 preserving `crash_app.api.handler`. Releases leave the handler, runtime, and routing
 unchanged.
 
-### Usage Costs & Security Constraints
+### Security & Public Access
 
-- **Assessment cost condition — migration pending**: As of October 27, 2026, the current account's introductory S3 allowance has expired and AWS reports no current-month credits. Lambda, CloudFront, and CloudWatch usage is within reported Free Tier allowances. S3 migration to an eligible account awaits access; current hosting is not verified zero-cost.
-- **Rechecking eligibility**: Check account age, offers, credits, and billing before deployment; low usage alone does not establish free hosting. See [AWS Free Tier](https://aws.amazon.com/free/), [S3](https://aws.amazon.com/s3/pricing/), [CloudFront](https://aws.amazon.com/cloudfront/pricing/), and [Lambda pricing](https://aws.amazon.com/lambda/pricing/).
 - **Temporary Credentials**: GitHub uses OIDC, Lambda uses its execution role, and CloudFront uses OAC for private S3 access.
 - **Public URL**: [The dashboard](https://d9tany0cdnjow.cloudfront.net/) and public API require no authentication or AWS credentials.
 
