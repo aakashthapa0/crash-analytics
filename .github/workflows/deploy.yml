@@ -1,0 +1,91 @@
+name: Test and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Validate AWS access template
+        run: |
+          python -m pip install cfn-lint==1.58.0
+          cfn-lint infra/github-actions.yaml
+      - run: python -m pytest
+      - run: npm ci --prefix frontend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: python scripts/package_lambda.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        with:
+          name: release
+          retention-days: 3
+          path: |
+            dist/lambda.zip
+            frontend/public/
+          if-no-files-found: error
+
+  deploy:
+    needs: check
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      API_FUNCTION: lubbock-crash-explorer
+      FRONTEND_BUCKET: lubbock-crash-frontend-626619999361-us-east-1
+      SITE_URL: https://d9tany0cdnjow.cloudfront.net/
+      API_URL: https://ah2gf3hitgykmkk5rttpmxf3f40syqig.lambda-url.us-east-1.on.aws/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: '626619999361'
+          role-session-name: GitHubActions-${{ github.run_id }}
+      - name: Update API code
+        shell: bash
+        run: |
+          revision=$(aws lambda get-function-configuration --function-name "$API_FUNCTION" --query RevisionId --output text)
+          aws lambda update-function-code --function-name "$API_FUNCTION" --revision-id "$revision" --zip-file fileb://dist/lambda.zip --query LastUpdateStatus --output text
+          aws lambda wait function-updated --function-name "$API_FUNCTION"
+          python3 scripts/smoke.py "$API_URL" --api-only
+      - name: Upload frontend assets, then HTML
+        shell: bash
+        run: |
+          aws s3 sync frontend/public/assets/ "s3://$FRONTEND_BUCKET/static/assets/" --cache-control 'public, max-age=31536000, immutable' --only-show-errors
+          aws s3 cp frontend/public/index.html "s3://$FRONTEND_BUCKET/index.html" --content-type 'text/html; charset=utf-8' --cache-control no-store --only-show-errors
+      - name: Check production
+        run: python3 scripts/smoke.py "$SITE_URL"

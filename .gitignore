@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+.env
+raw/
+district_crashes.csv
+build/
+dist/
+*.zip
+*.egg-info/
+node_modules/
+/frontend/public/
+/.delta/

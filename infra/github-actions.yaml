@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub Actions access to release the existing app using temporary credentials.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  GitHubSubject:
+    Type: String
+    Default: repo:aakashthapa0@20964527/crash-analytics@1436078126:ref:refs/heads/main
+    AllowedPattern: 'repo:[A-Za-z0-9_.-]+@[0-9]+/[A-Za-z0-9_.-]+@[0-9]+:ref:refs/heads/main'
+  ApiFunctionName:
+    Type: String
+    Default: lubbock-crash-explorer
+    AllowedPattern: '[A-Za-z0-9_-]+'
+  FrontendBucketName:
+    Type: String
+    Default: lubbock-crash-frontend-626619999361-us-east-1
+    AllowedPattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+
+Resources:
+  # This account has no GitHub provider yet; other repositories can reuse it later.
+  GitHubProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Release existing API code and frontend files from this repository's main branch.
+      # Pull requests and other repositories must never receive deployment access.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # GitHub's immutable subject binds access to the owner/repository IDs.
+                token.actions.githubusercontent.com:sub: !Ref GitHubSubject
+      Policies:
+        - PolicyName: ReleaseApp
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionCode
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ApiFunctionName}
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${FrontendBucketName}
+                Condition:
+                  StringLike:
+                    s3:prefix: ['static/assets/*']
+              # No deletion, infrastructure changes, or access to the source-data bucket.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${FrontendBucketName}/index.html
+                  - !Sub arn:${AWS::Partition}:s3:::${FrontendBucketName}/static/assets/*
+
+Outputs:
+  DeployRoleArn:
+    Description: Set this as the GitHub repository variable AWS_DEPLOY_ROLE_ARN.
+    Value: !GetAtt DeployRole.Arn
