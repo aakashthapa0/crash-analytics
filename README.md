@@ -50,6 +50,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 # (Optional to run test suite: python -m pip install -r requirements-dev.txt)
 
+# Install frontend dependencies from the lockfile in the frontend folder.
 npm ci --prefix frontend
 
 # Start both FastAPI (port 8000) and Vite dev server (port 5173) concurrently:
